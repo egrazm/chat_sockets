@@ -1,0 +1,192 @@
+#######################################
+# Challenge 4 — Chat App Pseudocode   #
+#######################################
+
+# -------------------------------------
+# SERVIDOR — Multi-Cliente con Broadcast
+# -------------------------------------
+
+# 1. Importar socket + select
+import socket
+import select
+
+# 2. Crear clase ChatServer
+class ChatServer:
+    def __init__(self):
+        # IP y puerto
+        self.host = '127.0.0.1'
+        self.port = 5000
+        # Lista de sockets activos
+        self.sockets_list = []
+        self.server_socket = None
+
+    def start(self):
+        # 3. Crear socket TCP principal
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # 4. Reusar puerto (opcional)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # 5. Enlazar a IP y puerto
+        self.server_socket.bind((self.host, self.port))
+        # 6. Poner en escucha
+        self.server_socket.listen()
+        print(f"Servidor escuchando en {self.host}:{self.port}")
+
+        # 7. Agregar socket principal a lista
+        self.sockets_list.append(self.server_socket)
+
+        # 8. Loop principal
+        while True:
+            # 9. select para esperar eventos
+            read_sockets, _, exception_sockets = select.select(self.sockets_list, [], self.sockets_list)
+
+            for notified_socket in read_sockets:
+                if notified_socket == self.server_socket:
+                    # Nueva conexión entrante
+                    client_socket, client_address = self.server_socket.accept()
+                    self.sockets_list.append(client_socket)
+                    print(f"Conexión aceptada de {client_address}")
+                else:
+                    # Mensaje de cliente existente
+                    message = notified_socket.recv(1024)
+                    if not message:
+                        # Cliente cerró conexión
+                        self.disconnect(notified_socket)
+                        continue
+                    # Reenviar a todos menos al emisor
+                    self.broadcast(message, notified_socket)
+
+            for notified_socket in exception_sockets:
+                self.disconnect(notified_socket)
+
+    def broadcast(self, message, sender_socket):
+        for client_socket in self.sockets_list:
+            if client_socket != self.server_socket and client_socket != sender_socket:
+                try:
+                    client_socket.send(message)
+                except:
+                    self.disconnect(client_socket)
+
+    def disconnect(self, client_socket):
+        print("Cliente desconectado.")
+        self.sockets_list.remove(client_socket)
+        client_socket.close()
+
+# 10. Ejecutar servidor
+if __name__ == "__main__":
+    server = ChatServer()
+    server.start()
+
+# -------------------------------------
+# CLIENTE — Enviar y Recibir Mensajes
+# -------------------------------------
+
+import socket
+import sys
+import select
+
+class ChatClient:
+    def __init__(self):
+        self.host = '127.0.0.1'
+        self.port = 5000
+        self.client_socket = None
+
+    def start(self):
+        # 1. Crear socket TCP cliente
+        self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # 2. Conectar al servidor
+        self.client_socket.connect((self.host, self.port))
+        print(f"Conectado a {self.host}:{self.port}")
+        print("Escribí un mensaje (exit para salir)")
+
+        # 3. Loop principal
+        while True:
+            sockets_list = [sys.stdin, self.client_socket]
+
+            read_sockets, _, _ = select.select(sockets_list, [], [])
+
+            for notified_socket in read_sockets:
+                if notified_socket == self.client_socket:
+                    # Mensaje del servidor
+                    message = self.client_socket.recv(1024)
+                    if not message:
+                        print("Servidor desconectado.")
+                        sys.exit()
+                    print(f"\nOtro> {message.decode().strip()}")
+                    print("Vos> ", end='', flush=True)
+                else:
+                    # Mensaje del usuario
+                    message = sys.stdin.readline()
+                    if message.strip().lower() == "exit":
+                        print("Saliendo...")
+                        self.client_socket.close()
+                        sys.exit()
+                    self.client_socket.sendall(message.encode())
+                    print("Vos> ", end='', flush=True)
+
+# 4. Ejecutar cliente
+if __name__ == "__main__":
+    client = ChatClient()
+    client.start()
+
+
+┌─────────────┐                 ┌─────────────┐
+│  SERVIDOR   │                 │   CLIENTE   │
+└─────────────┘                 └─────────────┘
+       │                               │
+       │                               │
+       │         Inicia                │
+       │ <──────────────────────────── │
+       │                               │
+       ▼                               ▼
+┌─────────────┐                 ┌─────────────┐
+│ Crear socket│                 │ Crear socket│
+└─────────────┘                 └─────────────┘
+       │                               │
+       ▼                               ▼
+┌─────────────┐                 ┌─────────────┐
+│ Bind a IP:PU│                 │ Conectar a  │
+│ Listen()    │ ───────────────▶│ servizdor    │
+└─────────────┘                 └─────────────┘
+       │                               │
+       ▼                               │
+┌─────────────┐                        │
+│ accept()    │◄───────────────────────┘
+│ Espera      │
+└─────────────┘
+       │
+       ▼
+┌─────────────┐
+│ Cliente     │
+│ conectado   │
+└─────────────┘
+       │
+       ▼
+┌─────────────┐
+│ Recibir     │◄─────────────────────┐
+│ mensaje     │                      │
+└─────────────┘                      │
+       │                             │
+       ▼                             │
+┌─────────────┐                      │
+│ Mostrar     │                      │
+│ mensaje     │                      │
+└─────────────┘                      │
+       │                             │
+       ▼                             │
+┌─────────────┐                      │
+│ Responder   │ ───────────────▶ Enviar mensaje ──▶
+└─────────────┘                      │
+       │                             │
+       ▼                             │
+┌─────────────┐                      │
+│ Loop        │                      │
+│ hasta que   │                      │
+│ cliente     │                      │
+│ se vaya     │                      │
+└─────────────┘                      │
+       │                             │
+       ▼                             │
+┌─────────────┐                      │
+│ Cerrar      │◄─────────────────────┘
+│ sockets     │
+└─────────────┘
